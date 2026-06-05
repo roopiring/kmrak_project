@@ -8,7 +8,7 @@
 - **Storage & Infra:** PostgreSQL, MS SQL, MinIO, Docker (WSL2)
 - **Crawling:** Selenium, BeautifulSoup, requests
 ## Architecture
-<img width="500" height="1000" alt="image" src="https://github.com/roopiring/kmrak_project/blob/main/PIPELINE/Pipeline.PNG" />
+<img width="700" height="500" alt="image" src="https://github.com/roopiring/kmrak_project/blob/main/PIPELINE/Pipeline.PNG" />
 
 ## Key Achievements
 - **통합 관리:** PyInstaller 기반 파편화된 배치 스크립트를 Airflow DAG로 통합하여 관리 효율성 증대.
