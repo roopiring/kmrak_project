@@ -8,6 +8,10 @@
 - **Infrastructure:** On-premise (Web/DB/File Separation)
 - **Integration:** REST API, Toss Payments, Kakao Maps API
 
+## Architecture
+<img width="500" height="800" alt="image" src="https://github.com/roopiring/kmrak_project/blob/main/Backend/Backend.PNG" />
+
+
 ## Key Achievements
 - 레거시 운영 안정화: 인수인계 공백 상황에서 Pure PHP 및 MSSQL 기반의 온프레미스 시스템을 주도적으로 파악하여 운영 안정성 달성.
 - 대외 협업 플랫폼 구축: KB부동산 앱 및 한국공인중개사협회와 연동되는 전용 API를 구축하여 데이터 기반 의사결정 지원 및 실시간 중개 현황 시스템 마련.
