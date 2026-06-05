@@ -5,6 +5,10 @@
 ## Tech Stack
 - Kafka, Python(FastAPI), Consumer Worker, MSSQL
 
+## Architecture
+<img width="500" height="800" alt="image" src="https://github.com/roopiring/kmrak_project/blob/main/Kafka/Recommend.PNG" />
+
+
 ## Key Achievements
 - **실시간 추천 파이프라인 설계:** 사용자 이벤트 생성 시 즉시 Kafka로 비동기 전송하여 서비스 응답 속도 최적화.
 - **비동기 처리 구조 도입:** 추천 로직 처리를 메인 서버(Backend)와 분리된 Consumer Worker로 독립시켜 서비스 부하를 획기적으로 제거.
@@ -15,6 +19,8 @@
 - 분산 처리 성능: 파티션 3개, 컨슈머 워커 3개를 구성하여 초당 100건 이상의 이벤트 처리 성능을 확보함.
 - 수평 확장(Scale-out) 설계: Kafka의 파티션 전략과 컨슈머 그룹을 활용하여, 향후 트래픽 증가 시 파티션과 워커 노드를 추가하는 것만으로 처리량을 즉시 확장할 수 있는 구조로 만듬
 - 성능 검증: 분산 환경에서 부하 테스트를 통해 데이터 병목 없는 안정적인 스트리밍 파이프라인 검증 완료.
+
+
 
 ## Trouble Shooting
 1. 메시지 처리 안정성 및 장애 대응
