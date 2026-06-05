@@ -64,7 +64,7 @@
 
 ### [Backend & Reliability Engineering]
 - **System Architecture Separation:** 레거시 단일 서버의 하드웨어 리소스 병목을 타파하기 위해 인프라를 Web, Data, File 레이어로 물리 분리하여 가용성을 극대화했습니다.
-- **External Collaboration:** 사수/팀장이 없는 제약 환경 속에서도 **KB부동산 및 한국공인중개사협회(MOU)** 파트너십 요구사항을 주도적으로 분석하고, 대규모 트래픽을 견디는 회원 동기화 및 매물 통계 전용 API 설계 및 개발 전 과정을 리드했습니다.
+- **External Collaboration:** 사수/팀장이 없는 제약 환경 속에서도 **KB부동산 및 한국공인중개사협회(MOU)** 파트너십 요구사항을 주도적으로 분석하고, 회원 동기화 및 매물 통계 전용 API 설계 및 개발 전 과정을 리드했습니다.
 
 ---
 
