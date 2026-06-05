@@ -6,7 +6,7 @@
 
 ---
 
-### 🛠 Tech Stack
+### Tech Stack
 **[Data Engineering]**
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Apache Airflow](https://img.shields.io/badge/Apache_Airflow-017CEE?style=flat-square&logo=apacheairflow&logoColor=white)
