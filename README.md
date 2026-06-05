@@ -58,13 +58,13 @@
 ## 🎯 핵심 기술적 역량 요약 (Technical Competencies)
 
 ### [Data Engineering & Processing]
-- **Orchestration & Scale-out:** 하이브리드(Cloud/On-Premise) 환경에서 Airflow Celery 구조를 운용하여 인프라 비용을 최적화하고 확장성을 강화했습니다.
-- **Incremental Processing:** 전건 수집(Full Scan) 대신 **스냅샷 기반 증분 수집(Incremental ETL)** 모델을 도입하여 네트워크 I/O 및 대상 원천 서버의 부하를 최소화했습니다.
-- **Entity Normalization:** 비정형 법률 및 등기부 데이터를 Rule-based 파서와 Validator를 통해 정규화하여 분석 가능한 데이터 모델링(Gold Layer)을 완수하고 서비스 데이터 제품(Data Product)의 신뢰성을 확보했습니다.
+- **Orchestration & Scale-out:** 하이브리드(Cloud/On-Premise) 환경에서 Airflow Celery 구조를 운용하여 인프라 비용을 최적화하고 확장성을 강화.
+- **Incremental Processing:** 전건 수집(Full Scan) 대신 **스냅샷 기반 증분 수집(Incremental ETL)** 모델을 도입하여 네트워크 I/O 및 대상 원천 서버의 부하를 최소화.
+- **Entity Normalization:** 비정형 법률 및 등기부 데이터를 Rule-based 파서와 Validator를 통해 정규화하여 분석 가능한 데이터 모델링(Gold Layer)을 완수하고 서비스 데이터 제품(Data Product)의 신뢰성을 확보.
 
 ### [Backend & Reliability Engineering]
-- **System Architecture Separation:** 레거시 단일 서버의 하드웨어 리소스 병목을 타파하기 위해 인프라를 Web, Data, File 레이어로 물리 분리하여 가용성을 극대화했습니다.
-- **External Collaboration:** 사수/팀장이 없는 제약 환경 속에서도 **KB부동산 및 한국공인중개사협회(MOU)** 파트너십 요구사항을 주도적으로 분석하고, 회원 동기화 및 매물 통계 전용 API 설계 및 개발 전 과정을 리드했습니다.
+- **System Architecture Separation:** 레거시 단일 서버의 하드웨어 리소스 병목을 타파하기 위해 인프라를 Web, Data, File 레이어로 물리 분리하여 가용성을 극대화.
+- **External Collaboration:** 사수/팀장이 없는 제약 환경 속에서도 **KB부동산 및 한국공인중개사협회(MOU)** 파트너십 요구사항을 주도적으로 분석하고, 회원 동기화 및 매물 통계 전용 API 설계 및 개발 전 과정을 리드.
 
 ---
 
