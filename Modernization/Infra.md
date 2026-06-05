@@ -14,7 +14,7 @@
 - **레거시 호환성 확보:** 최신 Docker 환경과 구형 MSSQL(TLS) 간의 통신 오류를 보안 설정 튜닝으로 해결하여 레거시 데이터의 안전한 현대화 파이프라인 구축.  
 - **인프라 자동화:** Git 기반 CI/CD를 구축하여 5분 단위의 코드 동기화 및 자동 배포 체계를 수립, 운영 공수를 획기적으로 절감.
 
-## Trouble Shooting & Engineering Experience
+## Trouble Shooting
 1. 인프라 보안
 - Problem: XCP-ng 노출 시 해킹 봇의 무차별 공격 위험.
 - Solution: DMZ 즉시 해제, SSH root 외부 로그인 원천 차단, 강력한 패스워드 정책 적용.
