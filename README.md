@@ -33,7 +33,7 @@
 전체 인프라 시스템은 역할과 목적에 따라 물리적 인프라 분리(3-Tier) 및 클라우드-온프레미스 하이브리드 노드 분산 처리를 채택하여 자원 제약을 극복하고 고가용성을 확보.
 
 1. **데이터 파이프라인:** AWS Airflow Master와 On-Premise Worker 간 Celery 분산 구조로 비정형 법률 데이터 수집/검증.
-2. **스트리밍 서비스:** FastAPI(Producer)와 분산 컨슈머 워커 간 Kafka 장애 격리(Retry/DLQ) 실시간 추천 모델.
+2. **카프카 실시간 추천:** FastAPI(Producer)와 분산 컨슈머 워커 간 Kafka 장애 격리(Retry/DLQ) 실시간 추천 모델.
 3. **백엔드 인프라:** 레거시 단일 서버 병목 해소를 위한 Web-Data-File 물리 분리 3-Tier 안정화 구조.
 
 ---
