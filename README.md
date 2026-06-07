@@ -39,7 +39,7 @@
 ---
 
 ## Sub-Project Navigation (상세 아키텍처 및 소스코드 바로가기)
-각 서브 디렉토리의 `ooo.md`에서 상세 아키텍처 다이어그램, 운영 코드 명세, 트러블슈팅 이력을 실시간 확인하실 수 있습니다.
+각 서브 디렉토리의 `ooo.md`에서 상세 아키텍처 다이어그램, 운영 코드 명세, 트러블슈팅 이력을 확인하실 수 있습니다.
 
 ### 1. [Data Pipeline](./PIPELINE/DATA_PIPELINE.md)
 - **핵심 역할:** 파편화된 PyInstaller 레거시 스크립트를 Airflow Celery 분산 아키텍처로 고도화하여 중앙 집중식 가시성 확보.
