@@ -34,7 +34,8 @@
 
 1. **데이터 파이프라인:** AWS Airflow Master와 On-Premise Worker 간 Celery 분산 구조로 비정형 법률 데이터 수집/검증.
 2. **카프카 실시간 추천:** FastAPI(Producer)와 분산 컨슈머 워커 간 Kafka 장애 격리(Retry/DLQ) 실시간 추천 모델.
-3. **백엔드 인프라:** 레거시 단일 서버 병목 해소를 위한 Web-Data-File 물리 분리 3-Tier 안정화 구조.
+3. **등기부등본 파싱(권리분석):** 비정형 등기부 데이터를 권리 단위로 정규화하여 변경·이전·경정 이력을 병합하고, 현재 유효 권리 상태를 재구성하는 권리분석 엔진 설계.
+4. **백엔드 인프라:** 레거시 단일 서버 병목 해소를 위한 Web-Data-File 물리 분리 3-Tier 안정화 구조.
 
 ---
 
@@ -49,13 +50,17 @@
 - **핵심 역할:** 유저 실시간 클릭/조회 액션 이벤트 처리 및 실시간 추천 서빙 스트리밍 파이프라인 구현.
 - **주요 성과:** 파티션-컨슈머 1:1 매핑 병렬 처리 극대화, 메인 큐 블로킹 방지를 위한 Retry-Topic(2회 재시도) 및 DLQ(Dead Letter Queue) 기반 고도화 예외 처리 라인 구축.
 
-### 💻 3. [Backend Service](./Backend/Backend.md)
+### 3. [Property Rights Analysis Engine](./Domain/parsing_logic.md)
+- **핵심 역할:** 비정형 등기부등본 데이터를 구조화하여 현재 시점의 유효 권리 상태를 재구성하는 권리분석 엔진 설계 및 구현.
+- **주요 성과:** 변경·이전·경정 등기로 분산된 동일 권리를 순위번호 기반으로 병합(Merge)하여 최신 권리 상태를 정규화하고, 말소 권리 자동 제외·지분권 예외 처리·임차권 특수 파싱을 통해 선순위 권리 및 인수 권리 판단이 가능한 데이터 모델 구축.
+
+### 4. [Backend Service](./Backend/Backend.md)
 - **핵심 역할:** Pure PHP 기반 대외 연동 전용 API 설계 및 온프레미스 인프라 3-Tier 물리 분리 아키텍처 개선.
 - **주요 성과:** 단일 서버 내 Web-DB-File 자원 경합 및 병목 제거, MSSQL Recovery Pending 긴급 장애 복구 및 SQL Agent 자동화 스케줄링 안착, 해외 악성 트래픽 대응을 위한 Geo-IP 차단 정책 적용.
 
 ---
 
-## 🎯 핵심 기술적 역량 요약 (Technical Competencies)
+## 핵심 기술적 역량 요약 (Technical Competencies)
 
 ### [Data Engineering & Processing]
 - **Orchestration & Scale-out:** 하이브리드(Cloud/On-Premise) 환경에서 Airflow Celery 구조를 운용하여 인프라 비용을 최적화하고 확장성을 강화.
@@ -68,6 +73,6 @@
 
 ---
 
-### ✉️ Contact & Channels
+### Contact & Channels
 - **Email:** dino7238@naver.com
 - **Service Link:** [경매락 서비스 바로가기](https://kmrak.com)
