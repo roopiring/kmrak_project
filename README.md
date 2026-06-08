@@ -73,6 +73,11 @@
 
 ---
 
+## Architecture
+<img width="700" height="500" alt="image" src="https://github.com/roopiring/kmrak_project/blob/main/main.PNG" />
+
+---
+
 ### Contact & Channels
 - **Email:** dino7238@naver.com
 - **Service Link:** [경매락 서비스 바로가기](https://kmrak.com)
