@@ -30,3 +30,8 @@
   - Docker Logging 설정을 통해 로그 보관 주기를 최대 7일로 제한하여 스토리지 관리 효율성 확보.
   - Kafka Log Retention Policy를 7일로 최적화.
   - 리스너(Listener) 설정을 분리하여 Broker-PC 간의 통신 안정성 확보 및 토픽 데이터 전송 확인 완료.
+
+
+## Kafka UI VM 구축
+- 실제 운영중에 계속해서 로그로 확인해야하는 현상이 생겨서 웹 UI를 통해 효율적으로 확인이 필요해짐
+- UI VM: 2 vCPU, 8GB RAM, 30GB Disk 구성.
