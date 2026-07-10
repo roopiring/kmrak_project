@@ -18,3 +18,123 @@
   - 생각한방법:
      - 1. flink를 도입한다는것을 알게 되었고 flink를 사용해 DB에는 최적화시킨 데이터를 지속적으로 (1초마다) 빠르게 업데이트 시켜줘야함, S3원본데이터를 호출 시켜서 지속적으로 S3에 데이터를 올리는 방법을 생각
      - 2. 스노우플레이크를 사용해서 S3에 있는 데이터를 지속적으로 업데이트 할 수 있는 스노우파이프 구축해야함
+
+## 2일차
+1. S3에 파일 업로그 기능 구현
+   - 고려사항 및 적용사항 :
+      - 1. 업로드 성공여부 및 재시도 횟수(3회)
+      - 2. 몇건씩 업로드 시킬지(10만건), 10만건이 안되었어도 1시간에 한번씩 업로드하기
+      - 3. 성공 및 실패에 대한 로그기록 남기고 슬랙 알림
+   - 추후 진행 예정사항 :
+      - 하루에 한번씩 배치처리로 spark를 사용해 데이터 마트화 시켜보기(코인별 평균거래가, 총 거래량, 총 거래금액등)
+      
+2. Flink를 사용해서 집계데이터를 만들어 DB(Mysql)에 저장하기
+   - 트러블슈팅 발생
+   ### PyFlink 1.19.1 설치 시 Python 버전 및 setuptools 호환성 문제 해결
+   #### 문제 상황
+   - Flink 1.19.1 환경에서 Kafka Streaming 테스트를 위해 PyFlink를 설치하던 중 Python 의존성 오류가 발생했다.   
+   구성 환경:
+      OS: Ubuntu 24.04
+      Java: OpenJDK 17
+      Apache Flink: 1.19.1
+      PyFlink: 1.19.1
+      Kafka Connector: flink-sql-connector-kafka 3.2.0-1.19
+      Python: 3.12.3 (초기 환경)
+      1차 문제: Python 3.12 환경에서 PyFlink 설치 실패
+      증상
+      pip install apache-flink==1.19.1 실행 시 Apache Beam 빌드 과정에서 오류 발생.
+
+   주요 오류:
+      ModuleNotFoundError: No module named 'pkg_resources'
+   원인: 
+      PyFlink 1.19.1은 내부적으로 Apache Beam 2.48.0을 의존한다.
+      해당 버전의 Apache Beam은 Python 최신 버전 및 setuptools 최신 버전과 완전한 호환이 되지 않는다.      
+   초기 환경:      
+      Python 3.12
+          |
+      PyFlink 1.19.1
+          |
+      Apache Beam 2.48.0
+      
+      구조에서 의존성 충돌 발생.
+
+   해결 방법 1: Python 버전 변경      
+      PyFlink 1.19.1 권장 환경에 맞춰 Python 3.11 환경으로 변경했다.      
+      pyenv 설치      
+      기존 Ubuntu 기본 Python 환경을 유지하기 위해 pyenv를 사용했다.      
+      curl https://pyenv.run | bash
+
+   환경 변수 설정:
+      export PYENV_ROOT="$HOME/.pyenv"
+      export PATH="$PYENV_ROOT/bin:$PATH"
+      eval "$(pyenv init - bash)"
+      eval "$(pyenv virtualenv-init -)"
+      Python 3.11 설치
+      pyenv install 3.11.9
+
+   PyFlink 전용 가상환경 생성: pyenv virtualenv 3.11.9 flink-env      
+   활성화: pyenv activate flink-env      
+   확인: python --version      
+   결과: Python 3.11.9
+
+   2차 문제: setuptools 버전 호환성 오류
+      PyFlink 실행 시:python flink_upbit.py
+      오류 발생: ModuleNotFoundError: No module named 'pkg_resources'
+      확인: python -c "import pkg_resources"
+      결과: ModuleNotFoundError: No module named 'pkg_resources'
+      원인
+      - 설치된 setuptools 버전: setuptools 83.0.0
+        최신 setuptools에서는 기존 pkg_resources 모듈이 제거되었다.
+        하지만 Apache Beam 2.48.0은 해당 모듈을 필요로 한다.
+      의존성 구조:
+      PyFlink 1.19.1
+              |
+      Apache Beam 2.48.0
+              |
+      pkg_resources 필요
+              |
+      setuptools >= 81
+              |
+      pkg_resources 제거
+
+      해결 방법 2: setuptools 버전 고정      
+      setuptools 버전을 하위 버전으로 변경했다.      
+      pip install setuptools==70.3.0
+      확인:python -c "import pkg_resources; print('ok')"
+      결과: ok
+      최종 Python 환경
+      Python 3.11.9
+              |
+      pyenv virtualenv
+              |
+      PyFlink 1.19.1
+              |
+      Apache Beam 2.48.0
+              |
+      setuptools 70.3.0
+   
+      결과: 최종적으로 PyFlink Streaming Job 실행 성공.
+      
+      Kafka Connector를 추가한 뒤:
+      
+      Upbit WebSocket
+              |
+      Kafka Producer
+              |
+      Kafka Topic(upbit_test)
+              |
+      Flink SQL Kafka Source
+              |
+      PyFlink Streaming 처리
+              |
+      Console Sink
+      
+      실시간 데이터 처리 파이프라인 검증 완료.
+      
+      교훈
+      데이터 플랫폼 구성 시 라이브러리 버전 호환성이 중요하다.
+      최신 버전이 항상 최선이 아니며, 프레임워크가 요구하는 의존성 버전을 확인해야 한다.
+      Python 기반 데이터 처리 환경에서는 pyenv 등을 활용해 프로젝트별 Python 버전을 분리하는 것이 안정적이다.
+
+   일단 잘나오는것 확인...
+   - <img width="1186" height="218" alt="image" src="https://github.com/user-attachments/assets/35df2e6d-715a-427b-b582-d917118859e6" />
