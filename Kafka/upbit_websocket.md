@@ -442,6 +442,9 @@ SELECT
 
 # 7. 학습 및 개선 방향
 
+이렇게하면 1분동안 최대값,최소값,합계체결량을 알 수 있는데 
+1분동안 혹은 특정시간동안 최초의 체결된 데이터, 마지막 체결된 데이터에 대한 값을 구할 수 없어서 이 부분을 어떻게 하면 구현할 수 있는지 해야한다.
+
 현재 구현:
 
 ```
@@ -453,36 +456,6 @@ Window Aggregation
  |
 Print Sink
 ```
-
-다음 단계:
-
-```
-Kafka
- |
-Flink DataStream API
- |
-KeyBy(code)
- |
-ValueState
- |
-OHLC 생성
- |
-JDBC Sink
- |
-MySQL
- |
-Redis
-```
-
-State 기반 처리를 추가하여:
-
-* Open Price
-* Close Price
-* Candle 상태 관리
-* Timer 기반 Window 종료 처리
-
-를 구현할 예정이다.
-
 ---
 
 # 배운 점
@@ -492,10 +465,9 @@ State 기반 처리를 추가하여:
 3. Sink는 단순 출력 방식이 아니라 실제 데이터 저장 대상이다.
 4. Flink SQL Aggregate도 내부적으로 State를 사용한다.
 5. 직접적인 상태 제어가 필요한 경우 DataStream API와 State 처리가 필요하다.
+6. connector' = 'print'와 'connector' = 'kafka'의 차이
+   - print는 Flink가 만든 결과 (처리한)데이터를 어디로 보낼지 지정하는 설정
+   - kafka는 데이터를 가져오는곳
 
 
-그리고  'connector' = 'print'와 'connector' = 'kafka'의 차이에 대해서도 알게 되었다 print는 Flink가 만든 결과 (처리한)데이터를 어디로 보낼지 지정하는 설정
-kafka는 데이터를 가져오는곳
-이렇게하면 1분동안 최대값,최소값,합계체결량을 알 수 있는데 
-1분동안 혹은 특정시간동안 최초의 체결된 데이터, 마지막 체결된 데이터에 대한 값을 구할 수 없어서 이 부분을 어떻게 하면 구할지 공부해봐야한다.
  
