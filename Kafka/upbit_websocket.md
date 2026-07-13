@@ -176,6 +176,9 @@ GROUP BY
     window_end
 """)
 
+<img width="670" height="139" alt="image" src="https://github.com/user-attachments/assets/0f80e0a7-8034-4cf5-9a40-6c7fbaf451ca" />
+
+
 그리고  'connector' = 'print'와 'connector' = 'kafka'의 차이에 대해서도 알게 되었다 print는 Flink가 만든 결과 (처리한)데이터를 어디로 보낼지 지정하는 설정
 kafka는 데이터를 가져오는곳
 이렇게하면 1분동안 최대값,최소값,합계체결량을 알 수 있는데 
