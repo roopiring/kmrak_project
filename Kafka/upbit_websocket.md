@@ -180,28 +180,318 @@ GROUP BY
 
 - 트러블슈팅 발생
 
-1. 문제 상황 (Problem)
-Upbit 실시간 체결 데이터를 Kafka를 통해 수신하여 10초 단위 텀블 윈도우(Tumble Window)로 집계하는 PyFlink 스트리밍 파이프라인을 구축함.
-그러나 INSERT INTO 쿼리 실행 시, 데이터 유입은 확인되나 결과가 윈도우 처리(Sink)로 이어지지 않고 출력이 나오지 않는 현상이 발생함.
+# Flink 기반 실시간 체결 데이터 처리 트러블슈팅
 
-3. 원인 분석 (Root Cause)
-분석 결과, 두 가지 핵심적인 엔지니어링 이슈가 발견됨:
-워터마크(Watermark) 정체: Flink는 Event Time 기반 윈도우 처리 시, 워터마크가 윈도우 종료 시간을 통과해야만 결과를 출력함.
-Upbit 거래 데이터는 특정 시점에 데이터가 집중되고 이후 데이터가 들어오지 않는 간헐적 유입 패턴을 보이는데, 이로 인해 데이터가 없을 때 워터마크가 갱신되지 않아 윈도우가 닫히지 않고 무기한 대기하는 현상이 발생함.
+## 1. 문제 상황
 
-비동기 잡 제출 및 프로세스 종료: PyFlink의 execute_sql은 작업을 클러스터에 제출하는 비동기 방식임. 작업 제출 후 메인 프로세스가 즉시 종료되면서 Flink 잡도 함께 중단되는 문제가 있었음.
+Upbit WebSocket을 통해 수집한 실시간 체결 데이터를 Kafka Topic으로 전달하고, Flink를 이용해 1분봉 데이터를 생성하는 스트리밍 파이프라인을 구축하던 중 Window Aggregation 결과가 정상적으로 출력되지 않는 문제가 발생했다.
 
-3. 해결 방안 (Solution)
-Idle Timeout 설정: table.exec.source.idle-timeout 옵션을 10s로 설정함. 이를 통해 데이터가 일정 시간 유입되지 않더라도 시스템이 해당 파티션을 'Idle(유휴)' 상태로 간주하고, 강제로 워터마크를 전진시켜 윈도우를 정상적으로 종료하도록 함.
+구성 환경:
 
-프로세스 라이프사이클 관리: while True 루프를 적용하여 메인 스레드가 유지되도록 함으로써, 스트리밍 파이프라인이 지속적으로 Kafka를 감시하고 결과를 Sink로 배출할 수 있도록 함.
+```
+Upbit WebSocket
+      |
+      v
+Kafka Topic
+      |
+      v
+Flink SQL
+      |
+      v
+Window Aggregation
+```
 
-4. 배운 점 (Insights)
-스트리밍의 본질: 스트리밍 처리는 데이터의 '양'만큼이나 '데이터의 흐름(Flow)'과 '시간(Time)'을 제어하는 것이 중요하다는 것을 깨달음.
+목표:
 
-트러블슈팅 역량: 단순히 라이브러리를 호출하는 것을 넘어, Flink 내부의 지표(Metric)와 로그를 추적하여 '데이터는 들어오는데 결과가 왜 안 나오는지'에 대한 병목 지점을 논리적으로 해결함.
+* Kafka 체결 이벤트 수신
+* Event Time 기반 Window 처리
+* 체결 데이터를 시간 단위로 집계
+* 추후 MySQL 및 Redis 저장 구조 확장
 
-환경 이해: 스트리밍 파이프라인은 '실행 후 종료'가 아닌 '상시 가동'을 전제로 설계되어야 함을 실습을 통해 체득함.
+---
+
+# 2. Kafka Source 연동 확인
+
+먼저 Flink에서 Kafka 데이터를 정상적으로 읽는지 확인했다.
+
+Kafka Source 테이블 생성:
+
+```sql
+CREATE TABLE upbit_ticker (
+    type STRING,
+    code STRING,
+    trade_price DOUBLE,
+    trade_volume DOUBLE,
+    trade_timestamp BIGINT
+)
+WITH (
+    'connector' = 'kafka',
+    'topic' = '',
+    'properties.bootstrap.servers' = '',
+    'format' = 'json'
+)
+```
+
+테스트 결과:
+
+```
++I ticker KRW-BTC 93695000 0.001
+```
+
+정상적으로 Kafka 메시지를 읽는 것을 확인했다.
+
+---
+
+# 3. Event Time 및 Watermark 추가
+
+실시간 데이터 처리에서는 Processing Time이 아닌 실제 체결 발생 시간을 기준으로 처리하기 위해 Event Time을 추가했다.
+
+변경:
+
+```sql
+trade_timestamp BIGINT,
+
+event_time AS TO_TIMESTAMP_LTZ(trade_timestamp, 3),
+
+WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+```
+
+확인 결과:
+
+```
+event_time
+
+2026-07-13 04:18:29.265
+```
+
+정상적으로 변환됨을 확인했다.
+
+---
+
+# 4. Window Aggregation 결과 미출력 문제
+
+## 문제
+
+아래 SQL 실행 시 결과가 출력되지 않았다.
+
+```sql
+SELECT
+    code,
+    window_start,
+    window_end,
+    COUNT(*) AS trade_count
+FROM TABLE(
+    TUMBLE(
+        TABLE upbit_ticker,
+        DESCRIPTOR(event_time),
+        INTERVAL '5' SECOND
+    )
+)
+GROUP BY
+    code,
+    window_start,
+    window_end
+```
+
+원인 분석 결과:
+
+Flink Table API의 Streaming Query는 Batch Query처럼 즉시 결과를 반환하지 않는다.
+
+Window가 종료되고 Watermark 기준으로 완료되어야 결과가 생성된다.
+
+즉:
+
+```
+데이터 입력
+      |
+      |
+Window 진행
+      |
+      |
+Watermark 도달
+      |
+      |
+결과 출력
+```
+
+구조임을 확인했다.
+
+---
+
+# 5. Print Sink 방식으로 변경
+
+단순 SELECT 출력 방식 대신 Sink Table을 생성하여 Streaming 결과를 확인했다.
+
+```sql
+CREATE TABLE candle_print (
+    code STRING,
+    window_start TIMESTAMP(3),
+    window_end TIMESTAMP(3),
+    trade_count BIGINT,
+    high_price DOUBLE
+)
+WITH (
+    'connector' = 'print'
+)
+```
+
+이후 INSERT INTO 방식으로 변경:
+
+```sql
+INSERT INTO candle_print
+SELECT
+    code,
+    window_start,
+    window_end,
+    COUNT(*),
+    MAX(trade_price)
+FROM TABLE(
+    TUMBLE(
+        TABLE upbit_ticker,
+        DESCRIPTOR(event_time),
+        INTERVAL '10' SECOND
+    )
+)
+GROUP BY
+    code,
+    window_start,
+    window_end
+```
+
+결과:
+
+```
++I KRW-BTC
+window_start : 04:18:30
+window_end   : 04:18:40
+count        : 18
+high_price   : 93606000
+```
+
+정상 출력 확인.
+
+---
+
+# 6. Sink Schema 불일치 문제
+
+## 오류
+
+```
+Column types of query result and sink do not match.
+
+Different number of columns.
+```
+
+발생.
+
+원인:
+
+INSERT SELECT 결과 컬럼 개수와 Sink Table 컬럼 개수가 달랐다.
+
+Query 결과:
+
+```
+code
+window_start
+window_end
+COUNT(*)
+MAX(price)
+MAX(price)
+MIN(price)
+SUM(volume)
+```
+
+총 8개 컬럼 생성
+
+Sink:
+
+```
+code
+window_start
+window_end
+trade_count
+high_price
+low_price
+volume
+```
+
+7개 컬럼 정의
+
+불일치 발생.
+
+---
+
+# 해결
+
+SELECT 결과와 Sink Schema를 동일하게 맞춤.
+
+```sql
+SELECT
+    code,
+    window_start,
+    window_end,
+    COUNT(*) AS trade_count,
+    MAX(trade_price) AS high_price,
+    MIN(trade_price) AS low_price,
+    SUM(trade_volume) AS volume
+```
+
+정상 실행 확인.
+
+---
+
+# 7. 학습 및 개선 방향
+
+현재 구현:
+
+```
+Kafka
+ |
+Flink SQL
+ |
+Window Aggregation
+ |
+Print Sink
+```
+
+다음 단계:
+
+```
+Kafka
+ |
+Flink DataStream API
+ |
+KeyBy(code)
+ |
+ValueState
+ |
+OHLC 생성
+ |
+JDBC Sink
+ |
+MySQL
+ |
+Redis
+```
+
+State 기반 처리를 추가하여:
+
+* Open Price
+* Close Price
+* Candle 상태 관리
+* Timer 기반 Window 종료 처리
+
+를 구현할 예정이다.
+
+---
+
+# 배운 점
+
+1. Flink Streaming Query는 즉시 결과를 반환하지 않는다.
+2. Window 결과는 Event Time과 Watermark 진행에 따라 생성된다.
+3. Sink는 단순 출력 방식이 아니라 실제 데이터 저장 대상이다.
+4. Flink SQL Aggregate도 내부적으로 State를 사용한다.
+5. 직접적인 상태 제어가 필요한 경우 DataStream API와 State 처리가 필요하다.
 
 
 그리고  'connector' = 'print'와 'connector' = 'kafka'의 차이에 대해서도 알게 되었다 print는 Flink가 만든 결과 (처리한)데이터를 어디로 보낼지 지정하는 설정
