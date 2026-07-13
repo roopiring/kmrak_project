@@ -138,3 +138,46 @@
 
    일단 잘나오는것 확인...
    - <img width="1186" height="218" alt="image" src="https://github.com/user-attachments/assets/35df2e6d-715a-427b-b582-d917118859e6" />
+
+## 3일차
+ pyflink로 1분동안 데이터 합계에 대해서 추출하는 방법 완료
+ t_env.execute_sql("""
+   CREATE TABLE candle_print (
+       code STRING,
+       window_start TIMESTAMP(3),
+       window_end TIMESTAMP(3),
+       trade_count BIGINT,
+       high_price DOUBLE,
+       low_price DOUBLE,
+       volume DOUBLE
+   ) WITH (
+       'connector' = 'print'
+   )
+   """)
+
+   t_env.execute_sql("""
+INSERT INTO candle_print
+SELECT
+    code,
+    window_start,
+    window_end,
+    COUNT(*) AS trade_count,
+    MAX(trade_price) AS high_price,
+    MIN(trade_price) AS low_price,
+    SUM(trade_volume) AS volume
+FROM TABLE(
+    TUMBLE(TABLE upbit_ticker, 
+    DESCRIPTOR(event_time), 
+    INTERVAL '10' SECOND)
+)
+GROUP BY 
+    code, 
+    window_start, 
+    window_end
+""")
+
+그리고  'connector' = 'print'와 'connector' = 'kafka'의 차이에 대해서도 알게 되었다 print는 Flink가 만든 결과 (처리한)데이터를 어디로 보낼지 지정하는 설정
+kafka는 데이터를 가져오는곳
+이렇게하면 1분동안 최대값,최소값,합계체결량을 알 수 있는데 
+1분동안 혹은 특정시간동안 최초의 체결된 데이터, 마지막 체결된 데이터에 대한 값을 구할 수 없어서 이 부분을 어떻게 하면 구할지 공부해봐야한다.
+ 
