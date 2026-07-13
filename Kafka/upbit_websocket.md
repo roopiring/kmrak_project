@@ -168,7 +168,7 @@ SELECT
 FROM TABLE(
     TUMBLE(TABLE upbit_ticker, 
     DESCRIPTOR(event_time), 
-    INTERVAL '10' SECOND)
+    INTERVAL '1' MINIUTE)
 )
 GROUP BY 
     code, 
