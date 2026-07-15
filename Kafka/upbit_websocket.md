@@ -470,4 +470,19 @@ Print Sink
    - kafka는 데이터를 가져오는곳
 
 
+
+#4일차
+트러블 슈팅
+문제:
+KeyedProcessFunction의 on_timer 실행 후 TypeError: 'NoneType' object is not iterable 발생
+
+원인:
+PyFlink의 on_timer는 결과 데이터를 Stream 형태로 반환해야 하는데,
+아무 값도 반환하지 않아 None이 반환됨.
+
+해결:
+yield를 사용하여 generator 형태로 결과를 반환하도록 수정.
+
+결과:
+Timer 기반 집계 데이터를 downstream operator로 전달 가능한 구조 완성.
  
