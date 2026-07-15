@@ -471,18 +471,49 @@ Print Sink
 
 
 
-#4일차
-트러블 슈팅
-문제:
-KeyedProcessFunction의 on_timer 실행 후 TypeError: 'NoneType' object is not iterable 발생
+# 4일차
+sql형태의 데이터가 아닌 Dataframe형태로 1분봉데이터 만들기 완성(1분동안의 OHLCV(시가, 고가, 저가, 종가, 거래량))
 
-원인:
-PyFlink의 on_timer는 결과 데이터를 Stream 형태로 반환해야 하는데,
-아무 값도 반환하지 않아 None이 반환됨.
+<img width="1668" height="228" alt="image" src="https://github.com/user-attachments/assets/58aa3bc3-8404-4fbd-aa79-4ad47cbcb7c9" />
 
-해결:
-yield를 사용하여 generator 형태로 결과를 반환하도록 수정.
+## 알게된부분들 
+### 1. Keyby
+   ```
+   keyed_stream = json_stream.key_by(
+        lambda x: x.code 
+   )
+   ```
+   이부분이 들어오는 데이터들의 키가되어서 Flink 자체적으로 분산 처리하게 만들어줌
 
-결과:
-Timer 기반 집계 데이터를 downstream operator로 전달 가능한 구조 완성.
- 
+### 2. def on_timer(self, timestamp, ctx) 함수
+   이 함수는 def process_element(self, value, ctx) 안에서 내가 원하는 1분봉일때마다 실행되도록 호출함
+   ```
+   window_end = ((event_time // 60000) +1) * 60000
+   ctx.timer_service().register_event_time_timer(window_end)
+   ```
+   이 부분을 통해서 on_timer를 실행시키도록 만듬
+   1분동안 5000번의 process_element가 실행되도 on_timer은 1번만 실행됨
+   그리고 반드시 데이터 저장 후에는 clear()를 해줘야함
+### 3. OHLCV(시가, 고가, 저가, 종가, 거래량) 구하는 방법
+   특히 최종 체결가는 마지막까지 데이터를 업데이트 해야함 마지막 체결량이기때문에
+   
+
+
+## 트러블 슈팅
+### 문제:
+   - KeyedProcessFunction의 on_timer 실행 후 TypeError: 'NoneType' object is not iterable 발생
+
+### 원인:
+   - PyFlink의 on_timer는 결과 데이터를 Stream 형태로 반환해야 하는데, 아무 값도 반환하지 않아 None이 반환됨.
+
+### 해결:
+   - yield를 사용하여 generator 형태로 결과를 반환하도록 수정.
+
+### 결과:
+   - Timer 기반 집계 데이터를 downstream operator로 전달 가능한 구조 완성.
+
+### 알게된 점 :
+   - yield을 사용하는 이유 Flink downstream으로 전달할 결과 데이터를 생성
+   - yield를 사용하면 generator(Iterator) 형태가 되어
+   - Flink가 timer 결과를 순회하며 처리할 수 있음
+   - 반환값이 None이 되는 문제를 방지
