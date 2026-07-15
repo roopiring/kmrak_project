@@ -517,3 +517,6 @@ sql형태의 데이터가 아닌 Dataframe형태로 1분봉데이터 만들기 �
    - yield를 사용하면 generator(Iterator) 형태가 되어
    - Flink가 timer 결과를 순회하며 처리할 수 있음
    - 반환값이 None이 되는 문제를 방지
+
+
+문제발생 : env.set_parallelism(1)를 해제하니까 워터마크가 -가 됨 또한 처리량이 1개인 경우는 테스트용이라서 실무에서 사용 가능한 수준으로 만들어야함
