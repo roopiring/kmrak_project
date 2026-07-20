@@ -520,3 +520,126 @@ sql형태의 데이터가 아닌 Dataframe형태로 1분봉데이터 만들기 �
 
 
 문제발생 : env.set_parallelism(1)를 해제하니까 워터마크가 -가 됨 또한 처리량이 1개인 경우는 테스트용이라서 실무에서 사용 가능한 수준으로 만들어야함
+
+# 5일차 
+4일차 마지막에 발생한 문제에 대해서 해결하기 위한 작업 
+
+
+# 5일차 — Idle Subtask로 인한 Watermark 정체 해결 정체 문제 해결
+## 트러블 슈팅
+4일차 마지막 테스트에서 `env.set_parallelism(1)`을 제거하자 Watermark가 `Long.MIN_VALUE`에 머무르고, Event Time Timer가 실행되지 않는 문제가 발생했다.
+처리 병렬도를 1로 고정하는 방식은 단일 파티션 기반 테스트에서는 동작하지만, 실제 운영 환경의 병렬 처리와 확장성을 검증하기에는 적합하지 않았다. 따라서 병렬도를 강제로 1로 제한하지 않고 문제를 해결했다.
+
+### 문제
+`env.set_parallelism(1)`을 제거하면 현재 Watermark가 다음 초기값에서 진행되지 않았다.
+```text
+-9223372036854775808
+```
+이 값은 Java의 `Long.MIN_VALUE`이며, 아직 유효한 Watermark가 생성되지 않았다는 의미다.
+Watermark가 진행되지 않아 다음과 같이 등록한 Event Time Timer도 실행되지 않았다.
+```python
+ctx.timer_service().register_event_time_timer(window_end)
+```
+
+### 원인
+Kafka 파티션 수보다 Flink의 병렬도가 크게 설정되면서 일부 Subtask가 데이터를 전달받지 못했다.
+예를 들어 Kafka 파티션이 1개이고 Flink 병렬도가 여러 개라면 다음과 같은 상태가 발생할 수 있다.
+```text
+Subtask 1 → 데이터 수신 및 Watermark 생성
+Subtask 2 → 데이터 없음
+Subtask 3 → 데이터 없음
+Subtask 4 → 데이터 없음
+```
+Flink의 downstream Watermark는 입력 Subtask들의 Watermark 중 가장 작은 값을 기준으로 결정된다.
+데이터를 받지 못한 Subtask는 Watermark가 초기값인 `Long.MIN_VALUE`에 머무르기 때문에 전체 Watermark의 진행을 막았다.
+즉, Watermark가 시간 정보를 받지 못한 것이 아니라, **데이터가 없는 유휴 Subtask의 Watermark가 전체 Watermark 진행을 막은 것**이 원인이었다.
+
+### 해결
+
+WatermarkStrategy에 `with_idleness()`를 추가해 일정 시간 동안 데이터를 전달하지 않는 Subtask를 idle 상태로 처리했다.
+```python
+from pyflink.common import Duration
+from pyflink.common.watermark_strategy import WatermarkStrategy
+
+watermark_strategy = (
+    WatermarkStrategy
+        .for_bounded_out_of_orderness(Duration.of_seconds(5))
+        .with_timestamp_assigner(TradeTimestampAssigner())
+        .with_idleness(Duration.of_seconds(10))
+)
+```
+
+```python
+timed_stream = stream.assign_timestamps_and_watermarks(
+    watermark_strategy
+)
+```
+
+* `with_idleness(Duration.of_seconds(10))`은 특정 Subtask가 10초 동안 데이터를 받지 못하면 해당 Subtask를 idle 상태로 표시한다.
+* idle 처리된 Subtask는 전체 Watermark의 최솟값 계산에서 일시적으로 제외된다.
+* with_idleness()는 데이터를 버리는 기능이 아니라 유휴 Source를 Watermark 계산에서 제외하는 기능이다.
+
+```text
+데이터가 없는 Subtask
+        ↓
+10초 동안 입력 없음
+        ↓
+Idle 상태로 전환
+        ↓
+Watermark 계산에서 제외
+        ↓
+활성 Subtask 기준으로 Watermark 진행
+```
+
+### 결과
+`env.set_parallelism(1)`을 설정하지 않아도 데이터가 없는 Subtask가 10초 후 idle 상태로 전환되면서 Watermark가 정상적으로 진행됐다.
+Watermark가 Window 종료 시각을 통과하자 Event Time Timer도 정상적으로 실행됐으며, 코인별 OHLCV 집계 결과를 출력할 수 있었다.
+초기 10초 동안의 데이터를 제외하는 방식은 아니다. 초기에는 idle timeout이 지나지 않아 Watermark가 잠시 `Long.MIN_VALUE`로 보일 수 있지만, 데이터가 없는 Subtask가 idle 처리된 이후에는 활성 Subtask가 받은 데이터의 Event Time을 기준으로 Watermark가 진행된다.
+
+## 알게 된 점
+* `set_parallelism(1)`은 Watermark를 사용하기 위한 필수 설정이 아니다.
+* Kafka 파티션 수보다 Flink 병렬도가 크면 데이터를 받지 못하는 Subtask가 생길 수 있다.
+* Flink의 downstream Watermark는 여러 입력 Watermark 중 가장 느린 값을 기준으로 진행된다.
+* 입력이 없는 Subtask는 전체 Watermark의 진행을 막을 수 있다.
+* `with_idleness()`를 사용하면 장시간 데이터가 없는 Subtask를 Watermark 계산에서 제외할 수 있다.
+* 병렬도를 1로 고정하는 것은 테스트 단계에서는 간단하지만, 운영 환경에서는 파티션 수·병렬도·Idle 처리 전략을 함께 고려해야 한다.
+* Event Time Timer가 실행되지 않을 때는 Timer 코드뿐 아니라 Watermark가 실제로 진행 중인지 먼저 확인해야 한다.
+* Operator가 시작될 때는 아직 유효한 Watermark가 전파되지 않았기 때문에 current_watermark()는 초기값인 Long.MIN_VALUE를 반환할 수 있다.
+* 첫 Watermark가 생성되어 전파되면 current_watermark()는 정상적인 Event Time 기반 Watermark로 갱신된다.
+* 실행 직후의 Long.MIN_VALUE는 정상적인 초기 상태이며, 장시간 지속될 경우에는 Idle Subtask, 병렬도, Timestamp Assigner 등을 점검해야 한다.
+* Watermark는 현재 처리 중인 레코드의 Event Time이 아니라, Operator에 전파된 최신 Watermark를 반환한다.
+
+
+
+
+# 용어
+### env.set_parallelism(4)는 무슨 의미일까?? 
+   env.set_parallelism(4)는 Flink 실행 환경의 기본 병렬도를 4로 설정하는 것
+   각 Operator가 기본적으로 4개의 Subtask로 실행. 
+   다만 실제 병렬성은 데이터 소스의 특성에도 영향을 받음. 
+   예를 들어 Kafka Source는 Topic의 Partition 수보다 더 많은 Subtask가 동시에 데이터를 읽을 수는 없음.
+   Partition 1개이면 env.set_parallelism(4)여도 3개는 실행안됨
+   
+### keyBy(code)를 사용하는 이유는 무엇일까??
+   keyBy(code)를 사용하면 동일한 코인(code)의 이벤트가 항상 같은 Subtask로 전달.
+   Flink의 State는 Key 단위로 관리되므로 같은 코인의 OHLC와 거래량을 하나의 State에서 일관되게 집계가능.
+   만약 keyBy를 사용하지 않으면 동일한 코인의 이벤트가 여러 Subtask로 분산될 수 있어 State가 분리되고 정확한 집계가 어려워짐.
+   
+### WatermarkStrategy란? 
+   WatermarkStrategy는 Flink가 이벤트의 Event Time을 어떻게 추출하고 
+   Watermark를 어떻게 생성할지를 정의.
+   Event Time 기반 윈도우나 Timer는 이 Watermark를 기준으로 동작.
+   
+### Event Time, Processing Time, Watermark
+   Event Time은 거래소에서 실제 체결이 발생한 시각이고, Processing Time은 해당 데이터를 Flink가 처리한 시각.
+   Watermark는 현재까지 수신한 Event Time을 기준으로 이벤트 시간이 어디까지 진행됐는지를 나타내는 논리적 기준 시각.
+   Window 종료와 Event Time Timer 실행 여부를 판단하는 데 사용.
+   
+### Kafka Partition과 Flink Parallelism은 어떻게 맞출까?
+   Source Operator의 병렬도는 일반적으로 Kafka 파티션 수와 맞추는 것이 효율적.
+   파티션보다 병렬도가 작으면 하나의 Subtask가 여러 파티션을 읽게 되고, 반대로 병렬도가 크면 
+   일부 Subtask는 데이터를 받지 못해 Idle 상태가 됨. Event Time을 사용하는 경우에는 
+   Idle Subtask가 Watermark 진행을 막을 수 있으므로 with_idleness() 설정도 함께 고려
+
+# 실험해보고 싶은것
+### 1. 카프카 리밸런싱이 발생했을때
