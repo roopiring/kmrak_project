@@ -609,6 +609,113 @@ Watermark가 Window 종료 시각을 통과하자 Event Time Timer도 정상적�
 * 실행 직후의 Long.MIN_VALUE는 정상적인 초기 상태이며, 장시간 지속될 경우에는 Idle Subtask, 병렬도, Timestamp Assigner 등을 점검해야 한다.
 * Watermark는 현재 처리 중인 레코드의 Event Time이 아니라, Operator에 전파된 최신 Watermark를 반환한다.
 
+## Late Event 처리 정책
+### 1. 문제 정의
+네트워크 지연이나 파티션별 처리 속도 차이로 인해 Event Time이 현재 Watermark보다 이전인 Late Event가 발생할 수 있다.
+Late Event가 발생했을 때는 해당 이벤트가 속한 1분봉의 마감 여부를 기준으로 처리 방식을 구분한다.
+
+### 2. 1분봉 마감 전
+이벤트의 Event Time이 현재 Watermark보다 이전이더라도, 해당 이벤트가 속한 1분 윈도우의 종료 시각이 아직 Watermark를 지나지 않았다면 1분봉은 확정되지 않은 상태다.
+따라서 해당 이벤트를 현재 OHLCV State에 반영한다.
+
+```text
+event_time < current_watermark
+window_end > current_watermark
+
+→ Late Event이지만 1분봉은 아직 마감 전
+→ OHLCV State에 반영
+```
+
+단, Late Event가 들어오더라도 Open과 Close는 데이터의 도착 순서가 아니라 Event Time을 기준으로 계산해야 한다.
+
+* Open: 가장 이른 Event Time의 체결 가격
+* Close: 가장 늦은 Event Time의 체결 가격
+* High: 가장 높은 체결 가격
+* Low: 가장 낮은 체결 가격
+* Volume: 전체 체결량 합계
+
+### 3. 1분봉 마감 후
+
+현재 Watermark가 해당 이벤트의 `window_end`를 이미 지났다면 1분봉 집계와 저장이 완료된 상태로 판단한다.
+
+```text
+window_end <= current_watermark
+
+→ 이미 마감된 1분봉에 도착한 Too Late Event
+```
+
+실시간 처리가 중요한 Flink 스트리밍 파이프라인에서는 이미 확정된 1분봉 State를 다시 생성하거나 수정하지 않는다. 따라서 해당 이벤트는 현재 집계에서 제외하고 `return` 처리한다.
+
+```python
+if window_end <= current_watermark:
+    print(
+        f"[TOO_LATE_EVENT] "
+        f"code={code}, "
+        f"event_time={event_time}, "
+        f"window_end={window_end}, "
+        f"watermark={current_watermark}"
+    )
+    return
+```
+
+### 4. Too Late Event 보정 방법
+
+정확성이 매우 중요한 데이터라면 Too Late Event를 별도의 Kafka 토픽에 저장할 수 있다.
+
+```text
+Flink 실시간 집계
+        │
+        ├─ 정상 및 마감 전 Late Event
+        │       → 실시간 1분봉 집계
+        │
+        └─ Too Late Event
+                → late-trade-events 토픽
+                → 별도 보정 Consumer 또는 배치 작업
+                → 기존 1분봉 재계산 및 업데이트
+```
+
+Kafka 토픽 자체가 1분봉을 수정하는 것은 아니다. 토픽에는 보정이 필요한 이벤트를 저장하고, 별도의 Consumer나 배치 작업이 해당 데이터를 읽어 기존 1분봉을 재계산한다.
+
+### 5. 현재 프로젝트 적용 정책
+
+현재 프로젝트에서는 실시간 조회용 1분봉의 즉시 정합성보다 스트리밍 처리 흐름과 안정성을 우선한다.
+따라서 1분봉이 마감된 후 도착한 Too Late Event는 실시간 1분봉에 반영하지 않고 제외한다.
+대신 S3에 저장된 원본 체결 데이터를 이용해 배치 방식으로 1분봉을 다시 계산하고, 실시간으로 생성된 1분봉과 비교한다. 값이 다르면 배치 계산 결과를 기준으로 기존 1분봉 데이터를 보정한다.
+
+```text
+실시간 경로
+
+Upbit → Kafka → Flink → 실시간 1분봉
+
+
+정합성 보정 경로
+
+S3 원본 체결 데이터
+→ 배치 집계
+→ 1분봉 재계산
+→ 실시간 1분봉과 비교
+→ 차이가 있는 데이터만 업데이트
+```
+
+### 6. 최종 처리 기준
+
+```text
+1. event_time >= current_watermark
+   → 정상 이벤트
+   → OHLCV State에 반영
+
+2. event_time < current_watermark
+   AND window_end > current_watermark
+   → 마감 전 Late Event
+   → OHLCV State에 반영
+
+3. window_end <= current_watermark
+   → 마감 후 Too Late Event
+   → 실시간 State에 반영하지 않음
+   → 향후 S3 원본 데이터를 이용한 배치 집계로 보정
+```
+
+이 구조를 통해 실시간 파이프라인의 처리 지연과 복잡도를 낮추면서도, 원본 데이터를 이용한 배치 보정으로 최종 데이터 정합성을 확보한다.
 
 
 
