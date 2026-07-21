@@ -718,8 +718,19 @@ S3 원본 체결 데이터
 이 구조를 통해 실시간 파이프라인의 처리 지연과 복잡도를 낮추면서도, 원본 데이터를 이용한 배치 보정으로 최종 데이터 정합성을 확보한다.
 
 
+# 6일차
+- 체크포인트관련해서 작업을 진행
+- Savepoint라는것을 알게 됨
+   - 
+
 
 # 용어
+### Window의 가장 큰 역할은?
+   시간이나 개수 등의 기준으로 데이터를 그룹화(Grouping)해서 집계(Aggregation)할 수 있도록 하는 것.
+   Window는 스트림 데이터를 일정 기준(시간, 개수 등)으로 그룹화하여 집계하기 위한 기능. 
+   이 프로젝트에서는 1분 Tumbling Window를 사용하여 1분 동안 들어온 체결 데이터를 하나의 그룹으로 묶고, 
+   OHLCV를 계산한 후 MySQL과 Redis에 저장했습니다. Window를 사용하지 않으면 데이터가 계속 누적되어 1분봉과 같은 시간 단위 집계를 수행하기 어려움.
+
 ### env.set_parallelism(4)는 무슨 의미일까?? 
    env.set_parallelism(4)는 Flink 실행 환경의 기본 병렬도를 4로 설정하는 것
    각 Operator가 기본적으로 4개의 Subtask로 실행. 
@@ -731,6 +742,11 @@ S3 원본 체결 데이터
    keyBy(code)를 사용하면 동일한 코인(code)의 이벤트가 항상 같은 Subtask로 전달.
    Flink의 State는 Key 단위로 관리되므로 같은 코인의 OHLC와 거래량을 하나의 State에서 일관되게 집계가능.
    만약 keyBy를 사용하지 않으면 동일한 코인의 이벤트가 여러 Subtask로 분산될 수 있어 State가 분리되고 정확한 집계가 어려워짐.
+
+### Watermark
+   Watermark는 Event Time 기준으로 늦게 도착하는 데이터를 어느 시점까지 정상 데이터로 인정할 것인지를 결정하는 기준. 
+   업비트 체결 데이터에서 실시간성과 데이터 정확성 사이의 트레이드오프를 고려하여 5초를 선택.
+   5초 이내에 도착한 지연 데이터는 집계에 포함하고, 그보다 늦은 데이터는 Late Event로 처리하도록 설계.
    
 ### WatermarkStrategy란? 
    WatermarkStrategy는 Flink가 이벤트의 Event Time을 어떻게 추출하고 
@@ -747,6 +763,35 @@ S3 원본 체결 데이터
    파티션보다 병렬도가 작으면 하나의 Subtask가 여러 파티션을 읽게 되고, 반대로 병렬도가 크면 
    일부 Subtask는 데이터를 받지 못해 Idle 상태가 됨. Event Time을 사용하는 경우에는 
    Idle Subtask가 Watermark 진행을 막을 수 있으므로 with_idleness() 설정도 함께 고려
+
+### State란 무엇인가요?
+   State는 스트림 데이터를 처리하는 동안 Flink가 작업 중간 결과를 저장하는 공간. 
+   예를 들어 코인별 누적 거래량이나 최근 가격 같은 값을 메모리에 유지. 
+   장애가 발생하면 Checkpoint에 저장된 State를 복구하여 이어서 처리.
+
+### Flink는 왜 State를 메모리에 저장할까?
+   Flink는 실시간 스트림 데이터를 처리하는 시스템이기 때문에 빠른 연산이 중요. 
+   그래서 코인별 거래량이나 집계값 같은 State를 디스크가 아닌 RAM에 저장하여 매우 빠르게 읽고 쓸 수 있게함.
+   다만 RAM은 휘발성이므로 장애가 발생하면 State가 사라질 수 있기 때문에 
+   Checkpoint를 이용하여 주기적으로 디스크에 저장하고 복구 가능하게 만듬.
+
+### 왜 굳이 Checkpoint를 만들까?
+   State는 메모리에 저장되어 있기 때문에 장애가 발생하면 모두 사라짐.
+   그래서 Flink는 일정 주기마다 State를 Checkpoint로 디스크에 저장.
+   장애가 발생하면 마지막 Checkpoint에 저장된 State를 복구한 후, 해당 시점부터 스트림 처리를 이어서 수행.
+
+### Checkpoint에는 무엇이 저장되나?
+   Checkpoint에는 연산 중인 State와 Source의 처리 위치(예: Kafka Offset)가 함께 저장.
+   장애가 발생하면 State와 Offset을 함께 복구하여 중복 처리나 데이터 유실 없이 이어서 처리 가능.
+### Savepoint?
+   Savepoint는 운영자가 직접 생성하는 State 스냅샷.
+   새로운 기능을 배포하거나 Flink Job을 업그레이드할 때 기존 State를 유지한 채 
+   새로운 Job에서 이어서 처리하기 위해 사용합니다. 따라서 서비스를 중단하지 않고 안정적으로 버전을 변경.
+
+### Checkpoint와 Savepoint의 차이
+   Checkpoint는 장애 복구를 위해 시스템이 자동으로 생성하는 State 스냅샷.
+   Savepoint는 운영자가 직접 생성하며, 애플리케이션 업그레이드나 새로운 버전 배포,
+   다른 클러스터로 Job을 이전할 때 기존 State를 이어받기 위해 사용.
 
 # 실험해보고 싶은것
 ### 1. 카프카 리밸런싱이 발생했을때
@@ -813,3 +858,45 @@ Watermark 허용 지연시간을 짧게 설정하면 1분봉 결과를 빠르게
 이번 프로젝트에서는 실시간 조회 성능을 우선하면서도 일시적인 네트워크 지연을 일부 허용하기 위해 5초 Watermark를 적용했다.
 
 실시간 집계에서 제외된 Too Late Event는 즉시 보정하지 않고, 이후 S3에 저장된 원본 데이터를 기준으로 배치 재집계를 수행해 최종 데이터 정합성을 맞추는 구조를 선택했다.
+
+# 추가적인 트레이드오프
+## Flink vs Spark Structured Streaming
+Flink 선택
+이유: 낮은 지연시간, Event Time, Watermark, State 제어
+
+## Watermark 3초 vs 5초 vs 10초
+5초 선택
+이유: 실시간성과 Late Event 수용의 균형
+
+## 실시간 정확성 vs 응답속도
+Too Late Event는 실시간 집계에 반영하지 않음
+대신 배치에서 보정
+
+## Redis 캐시 vs DB 조회
+Redis 선택
+이유: 최근 1분봉은 조회가 많고 빠른 응답이 중요
+
+## Checkpoint 주기
+10초 선택
+너무 짧으면 I/O 증가
+너무 길면 장애 시 재처리 범위 증가
+
+## Kafka Partition 개수
+너무 적으면 병렬성 부족
+너무 많으면 관리 비용과 리밸런싱 부담 증가
+
+## Exactly Once vs At Least Once
+Flink 내부는 Exactly Once
+DB는 UPSERT로 멱등성 확보
+
+## State 저장 vs Stateless 처리
+OHLCV 계산은 State 사용
+메모리 사용량 증가라는 비용 존재
+
+## 1분봉 실시간 생성 vs 배치 생성
+실시간 생성으로 사용자 응답성 확보
+배치로 최종 정합성 보장
+
+## Kafka 보존기간(Retention)
+길게 설정하면 재처리 가능
+하지만 디스크 사용량 증가
