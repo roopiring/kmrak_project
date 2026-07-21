@@ -729,10 +729,30 @@ S3 원본 체결 데이터
 - 그래서 도커에 플링크를 설치하는 방식을 취하기로 함
 - 화면구축 및 체크포인트 생성까지 확인
 <img width="1328" height="219" alt="image" src="https://github.com/user-attachments/assets/c040e948-f342-416b-a29b-df01f6f159e5" />
+## 진행 및 한것
+Checkpoint 설정 및 UI를 통해 Flink 작동 확인
+Checkpoint Interval : 10초
+Checkpoint Mode : Exactly Once
+State Backend : HashMapStateBackend
+Checkpoint 저장소 설정
+
+## 내일 진행예정인것
+1. 로그를 확인해야함, UI상 리스토어만 확인하는것이 아님(현재 총체결량 1.5개인데 체크포인트때는 1인경우 1.5개가 로그가 나오면서 리스토어 되었을때 1개로 나와야함)
+2. 도커를 stop & start로 검증예정
+3. PostgreSQL 구축 후 1분봉 데이터 전송 테스트
+ 
+## 구축 완료 후 진행해봐야하는것
+1. 추후에 Savepoint를 만들어보기(플링크 버전업 같은것, 현재 프로세스 동작하면서 자연스럽게 시프트 되도록 테스트)
+
+## 앞으로 진행해야하는것
+- PostgreSQL 구축 후 sink를 통해 Excactly once에 대해서 학습하기
+- redis는 sink하지 않을것임, redis는 실시간 처리된 데이터를 가져가는것으로 만들 예정인데 백업된 데이터는 redis를 사용하는 의미가 없기 때문
+- 즉 Redis를 영구 저장 Sink로 사용하지 않고, 실시간 조회용 최신 상태 저장소로 사용.
+  
 
 
 
-# 용어
+# 용어 및 개념
 ### Window의 가장 큰 역할은?
    시간이나 개수 등의 기준으로 데이터를 그룹화(Grouping)해서 집계(Aggregation)할 수 있도록 하는 것.
    Window는 스트림 데이터를 일정 기준(시간, 개수 등)으로 그룹화하여 집계하기 위한 기능. 
@@ -791,6 +811,7 @@ S3 원본 체결 데이터
 ### Checkpoint에는 무엇이 저장되나?
    Checkpoint에는 연산 중인 State와 Source의 처리 위치(예: Kafka Offset)가 함께 저장.
    장애가 발생하면 State와 Offset을 함께 복구하여 중복 처리나 데이터 유실 없이 이어서 처리 가능.
+   
 ### Savepoint?
    Savepoint는 운영자가 직접 생성하는 State 스냅샷.
    새로운 기능을 배포하거나 Flink Job을 업그레이드할 때 기존 State를 유지한 채 
@@ -913,3 +934,7 @@ OHLCV 계산은 State 사용
 ## Kafka 보존기간(Retention)
 길게 설정하면 재처리 가능
 하지만 디스크 사용량 증가
+
+## Redis를 Sink로 쓰지 않음
+Flink 처리 결과의 영구 저장은 PostgreSQL이 담당하도록 설계하고, Redis는 최신 시세와 최근 집계 결과를 빠르게 제공하기 위한 서빙 캐시로 제한.
+과거 데이터의 재조회와 복구는 PostgreSQL 및 Kafka를 통해 수행하므로 Redis에는 전체 이력을 저장하지 않을 예정.
