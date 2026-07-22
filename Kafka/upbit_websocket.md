@@ -749,7 +749,264 @@ Checkpoint 저장소 설정
 - redis는 sink하지 않을것임, redis는 실시간 처리된 데이터를 가져가는것으로 만들 예정인데 백업된 데이터는 redis를 사용하는 의미가 없기 때문
 - 즉 Redis를 영구 저장 Sink로 사용하지 않고, 실시간 조회용 최신 상태 저장소로 사용.
   
+# 7일차
+- ui로는 생성확인을 했지만 실제 로그에선 확인을 못했는데 로그에도 출력되는것을 확인
+- 테스트방법은 docker kill > docker start 방식
+- <img width="1498" height="154" alt="image" src="https://github.com/user-attachments/assets/b42f6e08-0180-422f-ab25-d28dab473753" />
+- Checkpoint 기반 장애 복구 검증
+- Event Time 기반 Stateful Stream Processing 구현
+- ValueState를 이용하여 코인별 OHLCV 상태 관리
+- Checkpoint(EXACTLY_ONCE)를 10초 간격으로 설정
+- TaskManager를 강제 종료하여 장애 상황을 재현
+- 마지막 완료된 Checkpoint에서 Keyed State가 복원되는 것을 로그로 검증
+- 복구 후 카운트가 초기화되지 않고 Checkpoint 시점부터 이어지는 것을 확인
 
+* 이제 Mysql에 1분봉 데이터를 저장해야함
+```
+PRIMARY KEY (`coin_code`,`window_start`)
+복합키로 관리
+```
+```
+CREATE INDEX idx_coin_end
+ON coin_candle_1m(coin_code, window_end);
+인덱스추가해서 검색속도 빠르게하기
+```
+* 데이터 적재 성공
+<img width="1423" height="151" alt="image" src="https://github.com/user-attachments/assets/624d3577-7153-4850-856d-602fc8a975e9" />
+
+* 현재까지의 아키텍처
+```
+Upbit WebSocket
+    ↓
+Kafka
+    ↓
+PyFlink DataStream
+    ↓
+Event Time / Watermark
+    ↓
+Keyed State / Event-time Timer
+    ↓
+1분 OHLCV 생성
+    ↓
+Table API JDBC Connector
+    ↓
+MySQL coin_candle_1m
+```
+## mysql 적재까지 트러블슈팅
+
+### 문제 1. DataStream JDBC Sink 실행 실패
+* 발생한 문제 : 
+   - 처음에는 PyFlink DataStream API의 JdbcSink.sink()를 사용해 MySQL 저장을 구현시도.
+   - 하지만 실행 시 다음 오류가 발생했다.
+   ```
+      java.lang.NoSuchMethodException:
+      JdbcOutputFormat.createRowJdbcStatementBuilder([I)
+   ```
+* 원인
+- 사용 중인 PyFlink 1.19.1 환경에서 Python DataStream JDBC Sink와 Java JDBC Connector 간 메서드 호환 문제가 발생.
+- 코드나 SQL 문법의 문제가 아니라 PyFlink DataStream JDBC Sink 내부의 버전 호환 문제로 판단.
+
+* 해결
+- DataStream JDBC Sink를 제거하고 아래 구조로 변경.
+```
+DataStream
+    ↓
+Table API
+    ↓
+JDBC Table Connector
+    ↓
+MySQL
+```
+- 기존 코드는 제거했다.
+```
+candle_stream \
+    .add_sink(jdbc_sink)
+대신 StreamTableEnvironment를 생성했다.
+table_env = StreamTableEnvironment.create(env)
+```
+### 문제 2. env.execute() 실행 방식 혼동(알게된점)
+
+- 기존 DataStream 파이프라인에서는 다음 코드로 Job을 실행했다.
+```
+env.execute(
+    "Upbit 1m Candle JDBC Sink"
+)
+```
+- 그러나 Table API로 변경한 뒤에는 INSERT INTO SQL 실행이 Job 제출 역할을 한다.
+```
+table_result = table_env.execute_sql("""
+INSERT INTO mysql_candle_sink
+SELECT
+    coin_code,
+    window_start,
+    window_end,
+    open_price,
+    high_price,
+    low_price,
+    close_price,
+    trade_volume,
+    trade_count
+FROM candle_source
+""")
+```
+- 따라서 별도의 env.execute()는 제거, 최종 실행 주체는 다음 SQL임.
+```
+INSERT INTO mysql_candle_sink
+SELECT ...
+FROM candle_source
+```
+
+### 문제 3. DataStream에서 Table API 변환 시 시간 타입 충돌
+* 발생한 오류
+ ```
+java.lang.ClassCastException:
+java.sql.Timestamp cannot be cast to java.time.LocalDateTime
+```
+- 오류가 발생한 데이터는 정상적으로 생성된 1분봉이었다.
+```
++I[
+    KRW-BTC,
+    2026-07-22 06:08:00.0,
+    2026-07-22 06:09:00.0,
+    ...
+]
+```
+* 원인
+- DataStream의 시간 컬럼은 다음 타입으로 선언돼 있었음.
+```
+Types.SQL_TIMESTAMP()
+```
+-이 타입은 Java에서 java.sql.Timestamp로 변환됨.
+- 하지만 from_data_stream()에 별도로 작성한 스키마에서는 다음 타입을 강제로 지정함.
+```
+DataTypes.TIMESTAMP(3)
+```
+이 타입의 변환기는 java.time.LocalDateTime을 기대했다.
+
+결과적으로 다음 타입 충돌이 발생했다.
+```
+java.sql.Timestamp
+    ≠
+java.time.LocalDateTime
+```
+* 해결
+- from_data_stream()에서 Table 스키마를 다시 강제로 지정하지 않고, 기존 candle_type_info를 그대로 추론하도록 변경했다.
+```
+변경 전:
+
+candle_table = table_env.from_data_stream(
+    candle_stream,
+    Schema.new_builder()
+        .column("window_start", DataTypes.TIMESTAMP(3))
+        .column("window_end", DataTypes.TIMESTAMP(3))
+        .build()
+)
+
+변경 후:
+
+candle_table = table_env.from_data_stream(
+    candle_stream
+)
+```
+ -DataStream의 TypeInformation과 Table 변환 타입이 일치하면서 정상적으로 MySQL까지 적재됐다.
+
+### 문제 4. INSERT와 UPSERT 처리 방식(알게된점)
+```
+Flink SQL에서는 다음과 같이 INSERT INTO를 사용한다.
+
+INSERT INTO mysql_candle_sink
+SELECT ...
+FROM candle_source
+
+하지만 JDBC Sink 테이블에 기본키를 선언했다.
+
+PRIMARY KEY (coin_code, window_start) NOT ENFORCED
+
+이 선언을 기반으로 JDBC Connector가 기본키 단위의 Upsert 방식으로 데이터를 처리함.
+
+MySQL 관점에서는 다음과 유사한 동작이다.
+
+INSERT INTO coin_candle_1m (...)
+VALUES (...)
+ON DUPLICATE KEY UPDATE
+    ...
+
+따라서 같은 캔들이 재처리되면:
+
+기본키 없음
+→ INSERT
+
+같은 기본키 존재
+→ UPDATE
+
+가 이루어진다.
+
+이 구조는 장애 복구 시 중요하다.
+
+MySQL 저장 성공
+    ↓
+Checkpoint 완료 전 Flink 장애
+    ↓
+이전 Checkpoint에서 복구
+    ↓
+동일한 1분봉 재처리
+    ↓
+기본키 기준 UPDATE
+
+단순 INSERT만 사용하면 중복 키 오류가 발생할 수 있지만, Upsert 구조에서는 동일한 캔들을 안전하게 덮어쓸 수 있다.
+
+실제 MySQL 테이블에도 반드시 다음 기본키가 존재해야 한다.
+
+PRIMARY KEY (coin_code, window_start)
+```
+
+### 문제 5. DB 적재가 분 종료 후 5~8초 늦게 발생
+
+- 1분봉이 분 종료 즉시 저장되지 않고 약 5~8초 후 MySQL에 저장되는 현상을 확인했다.
+
+- 현재 구조
+```
+1분 종료
+    ↓
+Watermark 최대 5초 대기
+    ↓
+Event-time Timer 실행
+    ↓
+Table/JDBC 변환
+    ↓
+JDBC Buffer 최대 1초 대기
+    ↓
+네트워크 및 MySQL 처리
+```
+
+- 현재 JDBC 설정은 다음과 같다.
+   - 'sink.buffer-flush.max-rows' = '100',
+   - 'sink.buffer-flush.interval' = '1s'
+
+- 코인이 3개라면 1분에 약 3건만 생성되므로 100건 조건은 충족되지 않는다. 결국 1초 Flush Interval에 의해 데이터가 저장된다.
+
+- 예상 지연되는 지연이유.
+```
+Watermark: 약 5초
+JDBC Flush: 최대 약 1초
+기타 처리: 약 0~2초
+
+전체: 약 5~8초
+```
+현재 지연은 처리량 부족이나 Flink 성능 문제라기보다 설정에 의한 예상 가능한 결과로 판단.
+향후 실시간성을 높이는 실험에서는 다음 설정을 이용하면서 검토해야함.
+
+-다만 Row 단위 즉시 Flush는 DB 요청 횟수를 증가시키므로 처리량이 커졌을 때는 배치 크기와 지연 시간 사이의 트레이드오프를 다시 결정해야 함.
+
+### 진짜 JDBC Exactly-once와의 차이
+현재는 Flink Checkpoint로 Kafka Offset과 집계 State를 복구하고, MySQL JDBC Sink는 복구 과정에서 발생할 수 있는 재처리를 Primary Key 기반 Upsert로 멱등 처리. 이를 통해 중복 행 없이 최종 결과의 일관성을 유지하도록 설계.
+일반 JDBC Table Sink 자체는 XA 기반 트랜잭션 Exactly-once가 아니기 때문에 전달 관점에서는 At-least-once임. 
+대신 (coin_code, window_start) Primary Key 기반 Upsert로 재처리를 멱등하게 만들어 최종 결과 기준 Exactly-once 효과를 확보.
+
+## 궁금한것(트레이드오프?)
+- 현재 Flink에서 연산처리를 하는데 연산처리후 DB에까지 저장하는게 현재 프로젝트의 목적에 빠르게 부합하기 때문에
+- 고도화 작업할때 Flink에서는 연산처리만 하고 1분봉데이터는 카프카 토픽을 새롭게 만들어서 전달하고 컨슈머가 DB에 저장하도록하는게 더 빠를거 같음
+- 이 부분은 테스트해봐야한다! 그리고 운영의 난이도에서는 아무래도 flink에서 연산처리 후 DB에 바로 저장하는게 쉽긴 할거같다.(만들어보진 않았지만)
 
 
 # 용어 및 개념
